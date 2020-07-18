@@ -17,6 +17,7 @@ Installation:
 ```aws cloudformation create-stack --stack-name StateManager --template-body file://template.yaml```
 
 2. Copy Inspec profile to s3 bucket created.
+A sample inspec profile is available here https://github.com/awslabs/aws-systems-manager/tree/master/Compliance/InSpec/PortCheck. Copy its contents to s3 bucket.
 
 The SSM association is scheduled to run every midnight. The results are ported back to Systems Manager under configuration compliance. The association runs inspec tests on all instances tagged OS:Linux according to this configuration.
 
