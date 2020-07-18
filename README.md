@@ -10,3 +10,15 @@ Prerequisites:
   1. SSM enabled instance
   2. Chef-cdk installed
   3. aws-sdk-ssm gem installed
+  
+Installation:
+1. Run cloudformation template.
+
+```aws cloudformation create-stack --stack-name StateManager --template-body file://template.yaml```
+
+2. Copy Inspec profile to s3 bucket created.
+
+The SSM association is scheduled to run every midnight. The results are ported back to Systems Manager under configuration compliance. The association runs inspec tests on all instances tagged OS:Linux according to this configuration.
+
+
+
