@@ -1,0 +1,139 @@
+---
+Description: SSM document that checks Instance via inspec and publishes results to AWS SSM
+AWSTemplateFormatVersion: "2010-09-09"
+
+Parameters:
+  S3InspecBucketName:
+    Description: s3 bucket where inspec code is stored
+    Type: String
+    Default: ssm-inspec
+  
+  InspecProfilePath: 
+    Description: Path where inspec code is stored
+    Type: String
+    Default: "https://s3.amazonaws.com/ssm-inspec/base_linux_profile"
+  
+  PrincipalOrgID:
+    Description: Organisation ID
+    Type: String
+
+Resources: 
+  InspecBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+      AccessControl: Private
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: false
+      VersioningConfiguration:
+        Status: Enabled
+      BucketName: !Ref S3InspecBucketName
+
+  InspecBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref InspecBucket
+      PolicyDocument:
+        Statement:
+          - Effect: "Allow"
+            Action:
+              - "s3:PutObject"
+              - "s3:GetObject"
+              - "s3:ListBucket"
+              - "s3:PutObjectAcl"
+            Resource:
+              - Fn::Join:
+                  - ""
+                  - - !GetAtt InspecBucket.Arn
+                    - "/*"
+              - !GetAtt InspecBucket.Arn
+            Principal:
+              AWS: "*"
+            Condition:
+              StringEquals:
+                aws:PrincipalOrgID: !Ref PrincipalOrgID
+
+  InspecCheckLinuxAssociation:
+    Type: AWS::SSM::Association
+    Properties:
+      Name: !Ref InspecCheckDocumentLinux
+      AssociationName: "inspecCheckAgentsLinux"
+      Parameters:
+        sourceType: ["S3"]
+        sourceInfo: [!Sub '{"path": "${InspecProfilePath}"}']
+      ScheduleExpression: "cron(0 23 * * ? *)"
+      Targets:
+      - Key: tag:OS
+        Values: 
+        - Linux
+  
+  InspecCheckDocumentLinux:
+    Type: AWS::SSM::Document
+    Properties:
+      DocumentType: "Command"
+      Content:
+        schemaVersion: '2.2'
+        description: Run a single InSpec test or an InSpec profile on a group of managed instances.
+        parameters:
+          sourceType:
+            description: "(Required) Specify the source type."
+            type: String
+            allowedValues:
+            - GitHub
+            - S3
+          sourceInfo:
+            description: '(Required) Specify the information required to access the resource
+              from the source. If source type is GitHub, then you can specify any of the following:
+              ''owner'', ''repository'', ''path'', ''getOptions'', ''tokenInfo''. If source
+              type is S3, then you can specify ''path''. Example github parameters: {"owner":"awslabs","repository":"amazon-ssm","path":"Compliance/InSpec/PortCheck","getOptions":"branch:master"}'
+            type: StringMap
+            displayType: textarea
+            default: {}
+        mainSteps:
+        - action: aws:downloadContent
+          name: downloadContent
+          inputs:
+            sourceType: "{{ sourceType }}"
+            sourceInfo: "{{ sourceInfo }}"
+        - precondition:
+            StringEquals:
+            - platformType
+            - Linux
+          action: aws:runShellScript
+          name: runInSpecLinux
+          inputs:
+            runCommand:
+              - "#!/bin/bash"
+              - "export HOME=/root"
+              - "export CHEF_LICENSE=accept-no-persist"
+              - "if ! which curl &> /dev/null; then"
+              - "echo 'curl is missing from the instance! Exiting.'"
+              - "exit 1"
+              - "fi"
+              - 'TOKEN=`curl -sS -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"`'
+              - 'region=`curl -sS -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/placement/availability-zone | sed ''s/\(.*\)[a-z]/\1/''`'
+              - "complianceFile='Report-Compliance-20200225'"
+              - "s3Prefix='https://s3.dualstack.'"
+              - "s3Suffix=''"
+              - curl -sS "$s3Prefix$region.amazonaws.com$s3Suffix/aws-ssm-$region/statemanagerdocumentspayload/AWS-RunInspecChecks/$complianceFile" -o "$complianceFile"
+              - "if [ $? -ne 0 ] ; then"
+              - "echo 'Failed to download inspec compliance file from S3. Exiting.'"
+              - "exit 1"
+              - "fi"
+              - "inspec exec . --reporter json | ruby ./Report-Compliance-20200225"
+              - "if [ $? -ne 0 ] ; then"
+              - "echo 'Failed to run Inspec checks. Exiting.'"
+              - "exit 1"
+              - "fi"
+      Tags:
+        - Key: Name
+          Value: "Tonline Inspec Check agents"
+
+    
