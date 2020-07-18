@@ -134,6 +134,6 @@ Resources:
               - "fi"
       Tags:
         - Key: Name
-          Value: "Tonline Inspec Check agents"
+          Value: "Linux Inspec check"
 
     
